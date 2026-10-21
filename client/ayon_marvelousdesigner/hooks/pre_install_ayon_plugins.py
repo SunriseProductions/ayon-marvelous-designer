@@ -7,6 +7,7 @@ InstallQtBinding: Pre-launch hook that installs PySide6 to MD's
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import ClassVar
 
@@ -28,7 +29,13 @@ class InstallAyonPlugins(PreLaunchHook):
         md_setting = self.data["project_settings"]["marvelous_designer"]
         plugins_dir = md_setting["prelaunch_settings"].get(
             "plugins_dir", "")
-        plugins_dir = Path(plugins_dir)
+        if not plugins_dir:
+            self.log.warning("Plugins directory is not set.")
+            return
+        # The plugins directory lives in the user's home on Linux, so the
+        # setting must be able to use '~' and environment variables.
+        plugins_dir = Path(
+            os.path.expandvars(os.path.expanduser(plugins_dir)))
         if not plugins_dir.exists():
             self.log.warning("Plugins directory not found: %s", plugins_dir)
             return
@@ -75,12 +82,20 @@ class InstallAyonPlugins(PreLaunchHook):
         if "plugins" not in plugins_data:
             plugins_data["plugins"] = []
 
-        # Check if plugin already exists (avoid duplicates)
-        existing_titles = {
-            existing_plugins.get("m_PlugInTitle")
-            for existing_plugins in plugins_data["plugins"]
-        }
-        if "ayon_plugins" not in existing_titles:
+        # Point an existing entry at the current script, so a stale path
+        # from an older addon version or a manual install is fixed.
+        # Otherwise add a new entry (avoid duplicates).
+        script_suffix = "/ayon_marvelousdesigner/deploy/ayon_plugins.py"
+        existing_plugins = [
+            plugin for plugin in plugins_data["plugins"]
+            if plugin.get("m_PlugInTitle") == "ayon_plugins"
+            or plugin.get("m_SourcePath", "").replace(
+                "\\", "/").endswith(script_suffix)
+        ]
+        for plugin in existing_plugins:
+            plugin["m_PlugInFileName"] = deployed_script
+            plugin["m_SourcePath"] = deployed_script
+        if not existing_plugins:
             plugins_data["plugins"].append(new_plugin)
 
         # Write the updated data
